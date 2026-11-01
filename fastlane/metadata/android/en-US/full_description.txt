@@ -1,0 +1,22 @@
+AppShield helps you control which installed Android apps can access the internet.
+
+FEATURES
+
+• Browse installed applications.
+• Search for applications by name.
+• Select individual applications.
+• Select all listed applications.
+• Block network access for selected applications using Android VPN protection.
+• Start and stop protection from the app.
+
+HOW IT WORKS
+
+AppShield uses Android's VPN service to apply network blocking to the applications you select. It does not require an external VPN server.
+
+PRIVACY
+
+AppShield is open source and licensed under MIT.
+
+IMPORTANT
+
+Android VPN permission is required to activate protection. Only one VPN service can normally be active at a time.
