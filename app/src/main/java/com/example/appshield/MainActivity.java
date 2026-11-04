@@ -1,5 +1,8 @@
 package com.example.appshield;
 
+import com.example.appshield.security.AppIntegrityChecker;
+import com.example.appshield.security.IntegrityResult;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
@@ -205,6 +208,47 @@ public class MainActivity extends Activity {
 
         addSpace(root, 24);
 
+        // AppShield security integrity scanner
+        LinearLayout securityCard = createCard(root);
+
+        TextView securityHeading = makeText(
+                "SECURITY SCAN", 16, WHITE, true
+        );
+        securityCard.addView(securityHeading);
+
+        addSpace(securityCard, 7);
+
+        TextView securityDescription = makeText(
+                "Check AppShield's package identity and signing certificate.",
+                12, MUTED, false
+        );
+        securityCard.addView(securityDescription);
+
+        addSpace(securityCard, 12);
+
+        Button scanButton = makeButton(
+                "Run security scan", BLUE
+        );
+        securityCard.addView(scanButton);
+
+        scanButton.setOnClickListener(v -> {
+            scanButton.setEnabled(false);
+            scanButton.setText("Scanning...");
+
+            new Thread(() -> {
+                IntegrityResult result =
+                        new AppIntegrityChecker(getApplicationContext()).check();
+
+                runOnUiThread(() -> {
+                    scanButton.setEnabled(true);
+                    scanButton.setText("Run security scan");
+                    showIntegrityReport(result);
+                });
+            }).start();
+        });
+
+        addSpace(root, 24);
+
         TextView appsHeading = makeText(
                 "APPLICATIONS", 17, WHITE, true
         );
@@ -226,7 +270,12 @@ public class MainActivity extends Activity {
         searchInput.setTextColor(WHITE);
         searchInput.setTextSize(14);
         searchInput.setPadding(dp(14), dp(10), dp(14), dp(10));
-        searchInput.setBackgroundColor(PANEL);
+        android.graphics.drawable.GradientDrawable searchBackground =
+                new android.graphics.drawable.GradientDrawable();
+        searchBackground.setColor(Color.rgb(24, 35, 59));
+        searchBackground.setCornerRadius(dp(15));
+        searchBackground.setStroke(dp(1), Color.rgb(66, 101, 157));
+        searchInput.setBackground(searchBackground);
         root.addView(searchInput, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
         ));
@@ -377,7 +426,13 @@ public class MainActivity extends Activity {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(dp(10), dp(9), dp(10), dp(9));
-            row.setBackgroundColor(PANEL);
+            android.graphics.drawable.GradientDrawable rowBackground =
+                    new android.graphics.drawable.GradientDrawable();
+            rowBackground.setColor(Color.rgb(24, 35, 59));
+            rowBackground.setCornerRadius(dp(15));
+            rowBackground.setStroke(dp(1), Color.rgb(43, 59, 88));
+            row.setBackground(rowBackground);
+            row.setElevation(dp(2));
 
             LinearLayout.LayoutParams rowParams =
                     new LinearLayout.LayoutParams(
@@ -554,6 +609,58 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void showIntegrityReport(IntegrityResult result) {
+        StringBuilder report = new StringBuilder();
+
+        report.append(result.isHealthy()
+                ? "STATUS: No integrity warnings detected"
+                : "STATUS: Integrity warnings detected");
+
+        report.append("\\n\\nPackage: ")
+                .append(result.getPackageName());
+
+        report.append("\\nDebug build: ")
+                .append(result.isDebuggable() ? "Yes" : "No");
+
+        report.append("\\nSigning certificate available: ")
+                .append(result.getSigningCertificateAvailable() ? "Yes" : "No");
+
+        report.append("\\nTrusted release certificate: ")
+                .append(result.getReleaseCertificateMatches() ? "MATCH" : "NO MATCH");
+
+        if (!result.getCertificateSha256().isEmpty()) {
+            report.append("\\n\\nCertificate SHA-256:\\n")
+                    .append(result.getCertificateSha256());
+        }
+
+        if (result.getApkSha256() != null) {
+            report.append("\\n\\nAPK SHA-256:\\n")
+                    .append(result.getApkSha256());
+        }
+
+        if (!result.getFindings().isEmpty()) {
+            report.append("\\n\\nWARNINGS:");
+            for (String finding : result.getFindings()) {
+                report.append("\\n• ").append(finding);
+            }
+        }
+
+        if (!result.getInformation().isEmpty()) {
+            report.append("\\n\\nINFORMATION:");
+            for (String item : result.getInformation()) {
+                report.append("\\n• ").append(item);
+            }
+        }
+
+        report.append("\\n\\nNote: This scan checks app identity and signing. It is not a complete malware scan.");
+
+        new AlertDialog.Builder(this)
+                .setTitle("AppShield Security Report")
+                .setMessage(report.toString())
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
     private void resetStatistics() {
         new AlertDialog.Builder(this)
                 .setTitle("Reset statistics?")
@@ -627,8 +734,21 @@ public class MainActivity extends Activity {
     private LinearLayout createCard(LinearLayout parent) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(16), dp(16), dp(16));
-        card.setBackgroundColor(PANEL);
+        card.setPadding(dp(17), dp(17), dp(17), dp(17));
+
+        android.graphics.drawable.GradientDrawable background =
+                new android.graphics.drawable.GradientDrawable(
+                        android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                        new int[] {
+                                Color.rgb(31, 44, 76),
+                                Color.rgb(18, 27, 49)
+                        }
+                );
+
+        background.setCornerRadius(dp(22));
+        background.setStroke(dp(1), Color.rgb(62, 91, 145));
+        card.setBackground(background);
+        card.setElevation(dp(8));
 
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(
@@ -636,6 +756,7 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.WRAP_CONTENT
                 );
 
+        params.bottomMargin = dp(3);
         parent.addView(card, params);
         return card;
     }
@@ -659,11 +780,66 @@ public class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(label);
         button.setTextColor(WHITE);
-        button.setTextSize(12);
+        button.setTextSize(13);
+        button.setTypeface(null, Typeface.BOLD);
         button.setAllCaps(false);
-        button.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(color)
+        button.setPadding(dp(12), dp(8), dp(12), dp(8));
+
+        int dark = Color.rgb(
+                Math.max(0, Color.red(color) - 35),
+                Math.max(0, Color.green(color) - 35),
+                Math.max(0, Color.blue(color) - 35)
         );
+
+        android.graphics.drawable.GradientDrawable normal =
+                new android.graphics.drawable.GradientDrawable(
+                        android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                        new int[] { color, dark }
+                );
+        normal.setCornerRadius(dp(16));
+        normal.setStroke(dp(1), Color.argb(110, 180, 210, 255));
+
+        android.graphics.drawable.GradientDrawable pressed =
+                new android.graphics.drawable.GradientDrawable(
+                        android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                        new int[] { dark, color }
+                );
+        pressed.setCornerRadius(dp(16));
+        pressed.setStroke(dp(1), Color.rgb(120, 160, 230));
+
+        android.graphics.drawable.StateListDrawable states =
+                new android.graphics.drawable.StateListDrawable();
+
+        states.addState(
+                new int[] { android.R.attr.state_pressed },
+                pressed
+        );
+        states.addState(
+                new int[] { android.R.attr.state_enabled },
+                normal
+        );
+        states.addState(new int[] {}, normal);
+
+        button.setBackground(states);
+        button.setElevation(dp(7));
+
+        button.setOnTouchListener((view, event) -> {
+            if (event.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                view.animate()
+                        .scaleX(0.96f)
+                        .scaleY(0.96f)
+                        .setDuration(90)
+                        .start();
+            } else if (event.getAction() == android.view.MotionEvent.ACTION_UP
+                    || event.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                view.animate()
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .setDuration(130)
+                        .start();
+            }
+            return false;
+        });
 
         return button;
     }
