@@ -1,0 +1,26 @@
+Categories:
+  - Security
+
+License: MIT
+AuthorName: Esenkn
+WebSite: https://github.com/Esenkn/AppShield
+SourceCode: https://github.com/Esenkn/AppShield
+IssueTracker: https://github.com/Esenkn/AppShield/issues
+
+AutoName: AppShield
+
+RepoType: git
+Repo: https://github.com/Esenkn/AppShield.git
+
+Builds:
+  - versionName: 1.0.2
+    versionCode: 3
+    commit: v1.0.2
+    subdir: .
+    gradle:
+      - yes
+
+AutoUpdateMode: None
+UpdateCheckMode: None
+CurrentVersion: 1.0.2
+CurrentVersionCode: 3
