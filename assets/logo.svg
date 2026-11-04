@@ -1,0 +1,35 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AppShield logo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7DD3FC"/>
+      <stop offset="100%" stop-color="#A78BFA"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#22C55E"/>
+      <stop offset="100%" stop-color="#14B8A6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="72" fill="url(#bg)"/>
+
+  <path d="M256 44L392 96V224C392 323 325 405 256 456C187 405 120 323 120 224V96L256 44Z" fill="url(#shieldGrad)" opacity="0.96"/>
+
+  <circle cx="256" cy="230" r="94" fill="#08111F" opacity="0.28"/>
+
+  <g fill="none" stroke="#F8FAFC" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M205 231c0-34 25-60 58-60s58 26 58 60-25 60-58 60-58-26-58-60Z" opacity="0.9"/>
+    <path d="M256 171v120"/>
+    <path d="M196 230h120"/>
+    <path d="M230 197l52 66"/>
+    <path d="M282 197l-52 66"/>
+  </g>
+
+  <path d="M156 150l200 200" stroke="#F87171" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="138" fill="none" stroke="#E2E8F0" stroke-width="10" opacity="0.2"/>
+
+  <path d="M178 330c18 18 44 28 78 28s60-10 78-28" fill="none" stroke="url(#accent)" stroke-width="16" stroke-linecap="round" opacity="0.9"/>
+</svg>

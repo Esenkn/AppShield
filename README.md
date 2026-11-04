@@ -1,5 +1,7 @@
 # AppShield
 
+![AppShield logo](./assets/logo.svg)
+
 AppShield is an Android application that uses Android's VPN service
 to block network traffic for selected installed applications.
 
