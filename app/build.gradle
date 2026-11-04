@@ -2,16 +2,36 @@ plugins {
     id 'com.android.application'
 }
 
-def releaseStoreFile = providers.gradleProperty("APP_RELEASE_STORE_FILE").orNull
-def releaseStorePassword = providers.gradleProperty("APP_RELEASE_STORE_PASSWORD").orNull
-def releaseKeyAlias = providers.gradleProperty("APP_RELEASE_KEY_ALIAS").orNull
-def releaseKeyPassword = providers.gradleProperty("APP_RELEASE_KEY_PASSWORD").orNull
+def signingFile = new File(
+    System.getProperty("user.home"),
+    ".appshield-signing.properties"
+)
+
+def signingProperties = new Properties()
+
+if (signingFile.exists()) {
+    signingFile.withInputStream {
+        signingProperties.load(it)
+    }
+}
+
+def releaseStorePassword =
+        providers.gradleProperty("APP_RELEASE_STORE_PASSWORD").orNull
+
+def releaseKeyPassword =
+        providers.gradleProperty("APP_RELEASE_KEY_PASSWORD").orNull
+
+def releaseStoreFile =
+        providers.gradleProperty("APP_RELEASE_STORE_FILE").orNull
+
+def releaseKeyAlias =
+        providers.gradleProperty("APP_RELEASE_KEY_ALIAS").orNull
 
 def releaseSigningConfigured =
-        releaseStoreFile &&
         releaseStorePassword &&
-        releaseKeyAlias &&
-        releaseKeyPassword
+        releaseKeyPassword &&
+        releaseStoreFile &&
+        releaseKeyAlias
 
 android {
     namespace 'com.example.appshield'
@@ -21,14 +41,15 @@ android {
         applicationId 'com.esenkn.appshield'
         minSdk 23
         targetSdk 35
-        versionCode 4
-        versionName '1.0.3'
+        versionCode 5
+        versionName '1.0.4'
     }
 
-    if (releaseSigningConfigured) {
-        signingConfigs {
+    signingConfigs {
+        if (releaseSigningConfigured) {
             release {
                 storeFile file(releaseStoreFile)
+                storeType signingProperties.getProperty('storeType', 'PKCS12')
                 storePassword releaseStorePassword
                 keyAlias releaseKeyAlias
                 keyPassword releaseKeyPassword
@@ -37,11 +58,13 @@ android {
     }
 
     buildTypes {
+        debug {
+        }
+
         release {
             if (releaseSigningConfigured) {
                 signingConfig signingConfigs.release
             }
-
             minifyEnabled false
         }
     }

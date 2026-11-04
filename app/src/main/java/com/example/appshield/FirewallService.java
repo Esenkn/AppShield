@@ -5,6 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.net.VpnService;
 import android.os.Build;
@@ -13,16 +14,24 @@ import android.util.Log;
 
 import java.io.FileInputStream;
 import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class FirewallService extends VpnService {
 
     public static final String ACTION_START =
             "com.example.appshield.START_FIREWALL";
-
     public static final String ACTION_STOP =
             "com.example.appshield.STOP_FIREWALL";
+    public static final String ACTION_RESET_STATS =
+            "com.example.appshield.RESET_STATS";
 
     public static final String EXTRA_BLOCKED_APPS = "blocked_apps";
+
+    public static final String PREFS = "appshield_stats";
+    public static final String KEY_PACKETS = "packets";
+    public static final String KEY_BYTES = "bytes";
+    public static final String KEY_STARTED = "started";
+    public static final String KEY_ACTIVE = "active";
 
     private static final String TAG = "AppShield";
     private static final String CHANNEL_ID = "appshield_firewall";
@@ -30,24 +39,41 @@ public class FirewallService extends VpnService {
 
     private ParcelFileDescriptor vpnInterface;
     private Thread packetThread;
+    private Thread statsThread;
     private volatile boolean running = false;
+
+    private final AtomicLong packetsBlocked = new AtomicLong(0);
+    private final AtomicLong bytesBlocked = new AtomicLong(0);
+
+    private SharedPreferences preferences;
 
     @Override
     public void onCreate() {
         super.onCreate();
+        preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
         createNotificationChannel();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
 
-        if (intent == null || ACTION_STOP.equals(intent.getAction())) {
+        if (intent == null) {
+            return START_NOT_STICKY;
+        }
+
+        String action = intent.getAction();
+
+        if (ACTION_RESET_STATS.equals(action)) {
+            resetStatistics();
+            return START_NOT_STICKY;
+        }
+
+        if (ACTION_STOP.equals(action)) {
             stopFirewall();
             return START_NOT_STICKY;
         }
 
-        if (ACTION_START.equals(intent.getAction())) {
-
+        if (ACTION_START.equals(action)) {
             ArrayList<String> apps =
                     intent.getStringArrayListExtra(EXTRA_BLOCKED_APPS);
 
@@ -65,7 +91,6 @@ public class FirewallService extends VpnService {
     }
 
     private void startFirewall(ArrayList<String> apps) {
-
         try {
             Builder builder = new Builder()
                     .setSession("AppShield Firewall")
@@ -91,8 +116,6 @@ public class FirewallService extends VpnService {
                 return;
             }
 
-            // Establish the VPN before requesting the VPN-specific
-            // systemExempted foreground-service type.
             vpnInterface = builder.establish();
 
             if (vpnInterface == null) {
@@ -110,14 +133,29 @@ public class FirewallService extends VpnService {
                 startForeground(NOTIFICATION_ID, buildNotification());
             }
 
+            packetsBlocked.set(0);
+            bytesBlocked.set(0);
+
+            preferences.edit()
+                    .putLong(KEY_PACKETS, 0)
+                    .putLong(KEY_BYTES, 0)
+                    .putLong(KEY_STARTED, System.currentTimeMillis())
+                    .putBoolean(KEY_ACTIVE, true)
+                    .apply();
+
             running = true;
 
             packetThread = new Thread(
                     this::discardPackets,
                     "AppShield-PacketDrop"
             );
-
             packetThread.start();
+
+            statsThread = new Thread(
+                    this::saveStatistics,
+                    "AppShield-Stats"
+            );
+            statsThread.start();
 
             Log.i(TAG, "Firewall started for " + added + " selected apps");
 
@@ -128,12 +166,9 @@ public class FirewallService extends VpnService {
     }
 
     private void discardPackets() {
-
         ParcelFileDescriptor descriptor = vpnInterface;
 
-        if (descriptor == null) {
-            return;
-        }
+        if (descriptor == null) return;
 
         byte[] buffer = new byte[32767];
 
@@ -143,11 +178,12 @@ public class FirewallService extends VpnService {
             while (running) {
                 int length = input.read(buffer);
 
-                if (length < 0) {
-                    break;
-                }
+                if (length < 0) break;
 
-                // Intentionally discard selected apps' packets.
+                if (length > 0) {
+                    packetsBlocked.incrementAndGet();
+                    bytesBlocked.addAndGet(length);
+                }
             }
 
         } catch (Exception e) {
@@ -157,14 +193,46 @@ public class FirewallService extends VpnService {
         } finally {
             if (running) {
                 running = false;
+                preferences.edit().putBoolean(KEY_ACTIVE, false).apply();
                 stopForeground(true);
                 stopSelf();
             }
         }
     }
 
-    private Notification buildNotification() {
+    private void saveStatistics() {
+        while (running) {
+            preferences.edit()
+                    .putLong(KEY_PACKETS, packetsBlocked.get())
+                    .putLong(KEY_BYTES, bytesBlocked.get())
+                    .apply();
 
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        preferences.edit()
+                .putLong(KEY_PACKETS, packetsBlocked.get())
+                .putLong(KEY_BYTES, bytesBlocked.get())
+                .putBoolean(KEY_ACTIVE, false)
+                .apply();
+    }
+
+    private void resetStatistics() {
+        packetsBlocked.set(0);
+        bytesBlocked.set(0);
+
+        preferences.edit()
+                .putLong(KEY_PACKETS, 0)
+                .putLong(KEY_BYTES, 0)
+                .apply();
+    }
+
+    private Notification buildNotification() {
         Intent openApp = new Intent(this, MainActivity.class);
 
         PendingIntent pendingIntent = PendingIntent.getActivity(
@@ -186,9 +254,7 @@ public class FirewallService extends VpnService {
 
         return builder
                 .setContentTitle("AppShield is active")
-                .setContentText(
-                        "Blocking network traffic for selected apps"
-                )
+                .setContentText("Blocking selected apps")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
@@ -196,18 +262,14 @@ public class FirewallService extends VpnService {
     }
 
     private void createNotificationChannel() {
-
         if (Build.VERSION.SDK_INT >= 26) {
-
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
                     "AppShield Firewall",
                     NotificationManager.IMPORTANCE_LOW
             );
 
-            channel.setDescription(
-                    "Status of AppShield network protection"
-            );
+            channel.setDescription("AppShield protection status");
 
             NotificationManager manager =
                     getSystemService(NotificationManager.class);
@@ -219,7 +281,6 @@ public class FirewallService extends VpnService {
     }
 
     private void stopFirewall() {
-
         running = false;
 
         if (vpnInterface != null) {
@@ -228,9 +289,10 @@ public class FirewallService extends VpnService {
             } catch (Exception e) {
                 Log.w(TAG, "Error closing VPN interface", e);
             }
-
             vpnInterface = null;
         }
+
+        preferences.edit().putBoolean(KEY_ACTIVE, false).apply();
 
         if (Build.VERSION.SDK_INT >= 24) {
             stopForeground(STOP_FOREGROUND_REMOVE);

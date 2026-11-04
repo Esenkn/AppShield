@@ -3,338 +3,709 @@ package com.example.appshield;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.Drawable;
 import android.net.VpnService;
+import android.os.Build;
 import android.os.Bundle;
-import android.text.Editable;
-import android.text.TextWatcher;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public class MainActivity extends Activity {
-    private static final int VPN_REQUEST = 1001;
+
+    private static final int VPN_REQUEST_CODE = 1001;
+
+    private static final int BG = Color.rgb(11, 16, 32);
+    private static final int PANEL = Color.rgb(21, 29, 50);
+    private static final int BLUE = Color.rgb(79, 140, 255);
+    private static final int WHITE = Color.WHITE;
+    private static final int MUTED = Color.rgb(165, 177, 202);
+    private static final int GREEN = Color.rgb(32, 201, 151);
+
     private final Set<String> selectedApps = new HashSet<>();
     private final List<ApplicationInfo> installedApps = new ArrayList<>();
-    private LinearLayout appList;
-    private EditText searchBox;
-    private TextView statusText;
-    private TextView countText;
-    private boolean protectionActive = false;
+    private final List<LinearLayout> appRows = new ArrayList<>();
 
-    private int bg = Color.rgb(11, 16, 32);
-    private int panel = Color.rgb(21, 29, 50);
-    private int blue = Color.rgb(79, 140, 255);
-    private int white = Color.WHITE;
-    private int muted = Color.rgb(164, 177, 204);
+    private LinearLayout appList;
+    private EditText searchInput;
+
+    private TextView statusText;
+    private TextView statusDescription;
+    private TextView packetValue;
+    private TextView byteValue;
+    private TextView uptimeValue;
+    private TextView selectionCount;
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+
+    private final Runnable statsUpdater = new Runnable() {
+        @Override
+        public void run() {
+            updateStatistics();
+            handler.postDelayed(this, 1000);
+        }
+    };
+
+    private SharedPreferences statsPreferences;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        buildScreen();
-        loadApps();
-        renderApps("");
+
+        statsPreferences = getSharedPreferences(
+                FirewallService.PREFS,
+                MODE_PRIVATE
+        );
+
+        createInterface();
+        loadInstalledApps();
+        updateStatistics();
     }
 
-    private GradientDrawable rounded(int color, int radius) {
-        GradientDrawable d = new GradientDrawable();
-        d.setColor(color);
-        d.setCornerRadius(radius);
-        return d;
-    }
+    private void createInterface() {
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setBackgroundColor(BG);
 
-    private TextView text(String value, int size, int color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(value);
-        t.setTextSize(size);
-        t.setTextColor(color);
-        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        return t;
-    }
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(18), dp(20), dp(18), dp(30));
 
-    private LinearLayout vertical() {
-        LinearLayout l = new LinearLayout(this);
-        l.setOrientation(LinearLayout.VERTICAL);
-        return l;
-    }
+        scrollView.addView(root);
 
-    private LinearLayout.LayoutParams params(int width, int height) {
-        return new LinearLayout.LayoutParams(width, height);
-    }
+        TextView title = new TextView(this);
+        title.setText("🛡 AppShield");
+        title.setTextColor(WHITE);
+        title.setTextSize(29);
+        title.setTypeface(null, Typeface.BOLD);
+        root.addView(title);
 
-    private void buildScreen() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(bg);
+        TextView subtitle = new TextView(this);
+        subtitle.setText("Network firewall • On-device control");
+        subtitle.setTextColor(MUTED);
+        subtitle.setTextSize(13);
+        addSpace(root, 5);
+        root.addView(subtitle);
 
-        LinearLayout root = vertical();
-        root.setPadding(20, 24, 20, 24);
-        scroll.addView(root);
+        addSpace(root, 22);
 
-        TextView logo = text("🛡  AppShield", 28, white, true);
-        root.addView(logo);
+        LinearLayout statusCard = createCard(root);
 
-        TextView subtitle = text("Network firewall • On-device control", 14, muted, false);
-        LinearLayout.LayoutParams subParams = params(-1, -2);
-        subParams.topMargin = 5;
-        root.addView(subtitle, subParams);
+        TextView statusHeading = makeText(
+                "PROTECTION STATUS", 12, MUTED, true
+        );
+        statusCard.addView(statusHeading);
 
-        LinearLayout statusCard = vertical();
-        statusCard.setPadding(16, 16, 16, 16);
-        statusCard.setBackground(rounded(panel, 22));
-        LinearLayout.LayoutParams cardParams = params(-1, -2);
-        cardParams.topMargin = 24;
-        root.addView(statusCard, cardParams);
-
-        statusText = text("● Protection is OFF", 18, muted, true);
+        statusText = makeText("Checking status...", 21, WHITE, true);
+        addSpace(statusCard, 10);
         statusCard.addView(statusText);
 
-        TextView warning = text(
-            "Selected apps will be routed into a local VPN and their network packets dropped. Android will ask for VPN permission.",
-            13, muted, false);
-        LinearLayout.LayoutParams warningParams = params(-1, -2);
-        warningParams.topMargin = 10;
-        statusCard.addView(warning, warningParams);
+        statusDescription = makeText(
+                "Selected applications are routed through AppShield's local VPN.",
+                13, MUTED, false
+        );
+        addSpace(statusCard, 7);
+        statusCard.addView(statusDescription);
 
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams buttonsParams = params(-1, -2);
-        buttonsParams.topMargin = 16;
-        statusCard.addView(buttons, buttonsParams);
+        addSpace(root, 14);
 
-        Button start = new Button(this);
-        start.setText("Start protection");
-        start.setTextColor(white);
-        start.setBackground(rounded(blue, 14));
-        buttons.addView(start, new LinearLayout.LayoutParams(0, 52, 1));
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
 
-        Button stop = new Button(this);
-        stop.setText("Stop");
-        stop.setTextColor(white);
-        stop.setBackground(rounded(Color.rgb(65, 76, 99), 14));
-        LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(0, 52, 1);
-        stopParams.leftMargin = 10;
-        buttons.addView(stop, stopParams);
+        Button startButton = makeButton("Start protection", BLUE);
+        Button stopButton = makeButton("Stop", Color.rgb(190, 65, 85));
 
-        start.setOnClickListener(v -> startProtection());
-        stop.setOnClickListener(v -> stopProtection());
+        controls.addView(startButton, new LinearLayout.LayoutParams(
+                0, dp(48), 1
+        ));
 
-        TextView appsHeading = text("Choose apps to block", 20, white, true);
-        LinearLayout.LayoutParams headingParams = params(-1, -2);
-        headingParams.topMargin = 26;
-        root.addView(appsHeading, headingParams);
+        View buttonGap = new View(this);
+        controls.addView(buttonGap, new LinearLayout.LayoutParams(dp(10), 1));
 
-        countText = text("Loading installed apps…", 13, muted, false);
-        LinearLayout.LayoutParams countParams = params(-1, -2);
-        countParams.topMargin = 6;
-        root.addView(countText, countParams);
+        controls.addView(stopButton, new LinearLayout.LayoutParams(
+                0, dp(48), 1
+        ));
 
-        searchBox = new EditText(this);
-        searchBox.setSingleLine(true);
-        searchBox.setTextColor(white);
-        searchBox.setHintTextColor(muted);
-        searchBox.setHint("Search installed apps");
-        searchBox.setPadding(16, 6, 16, 6);
-        searchBox.setBackground(rounded(panel, 14));
-        LinearLayout.LayoutParams searchParams = params(-1, 52);
-        searchParams.topMargin = 14;
-        root.addView(searchBox, searchParams);
+        root.addView(controls);
 
-        LinearLayout selectionButtons = new LinearLayout(this);
-        selectionButtons.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams selectParams = params(-1, -2);
-        selectParams.topMargin = 8;
-        root.addView(selectionButtons, selectParams);
+        startButton.setOnClickListener(v -> requestProtection());
+        stopButton.setOnClickListener(v -> stopProtection());
 
-        Button selectAll = new Button(this);
-        selectAll.setText("Select all shown");
-        selectAll.setOnClickListener(v -> {
-            String query = searchBox.getText().toString().trim().toLowerCase();
-            for (ApplicationInfo info : installedApps) {
-                String name = getAppName(info).toLowerCase();
-                if (query.isEmpty() || name.contains(query) ||
-                    info.packageName.toLowerCase().contains(query)) {
-                    selectedApps.add(info.packageName);
+        addSpace(root, 22);
+
+        LinearLayout statsCard = createCard(root);
+
+        TextView statsHeading = makeText(
+                "LIVE FIREWALL STATISTICS", 14, WHITE, true
+        );
+        statsCard.addView(statsHeading);
+
+        addSpace(statsCard, 17);
+
+        packetValue = makeText("0", 25, GREEN, true);
+        statsCard.addView(packetValue);
+
+        TextView packetLabel = makeText(
+                "Packets read and discarded", 12, MUTED, false
+        );
+        addSpace(statsCard, 3);
+        statsCard.addView(packetLabel);
+
+        addSpace(statsCard, 17);
+
+        byteValue = makeText("0 B", 25, BLUE, true);
+        statsCard.addView(byteValue);
+
+        TextView byteLabel = makeText(
+                "Total data discarded", 12, MUTED, false
+        );
+        addSpace(statsCard, 3);
+        statsCard.addView(byteLabel);
+
+        addSpace(statsCard, 17);
+
+        uptimeValue = makeText("00:00:00", 25, WHITE, true);
+        statsCard.addView(uptimeValue);
+
+        TextView uptimeLabel = makeText(
+                "Firewall uptime", 12, MUTED, false
+        );
+        addSpace(statsCard, 3);
+        statsCard.addView(uptimeLabel);
+
+        addSpace(statsCard, 16);
+
+        Button resetButton = makeButton(
+                "Reset statistics", Color.rgb(55, 68, 94)
+        );
+        statsCard.addView(resetButton);
+
+        resetButton.setOnClickListener(v -> resetStatistics());
+
+        addSpace(root, 24);
+
+        TextView appsHeading = makeText(
+                "APPLICATIONS", 17, WHITE, true
+        );
+        root.addView(appsHeading);
+
+        TextView appsDescription = makeText(
+                "Choose the apps whose traffic AppShield should block.",
+                12, MUTED, false
+        );
+        addSpace(root, 5);
+        root.addView(appsDescription);
+
+        addSpace(root, 13);
+
+        searchInput = new EditText(this);
+        searchInput.setSingleLine(true);
+        searchInput.setHint("Search installed apps...");
+        searchInput.setHintTextColor(MUTED);
+        searchInput.setTextColor(WHITE);
+        searchInput.setTextSize(14);
+        searchInput.setPadding(dp(14), dp(10), dp(14), dp(10));
+        searchInput.setBackgroundColor(PANEL);
+        root.addView(searchInput, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
+        ));
+
+        searchInput.addTextChangedListener(
+                new android.text.TextWatcher() {
+                    @Override
+                    public void beforeTextChanged(
+                            CharSequence s, int start, int count, int after) {
+                    }
+
+                    @Override
+                    public void onTextChanged(
+                            CharSequence s, int start, int before, int count) {
+                        filterApps(s.toString());
+                    }
+
+                    @Override
+                    public void afterTextChanged(
+                            android.text.Editable s) {
+                    }
                 }
-            }
-            renderApps(query);
-        });
-        selectionButtons.addView(selectAll, new LinearLayout.LayoutParams(0, 48, 1));
+        );
 
-        Button clear = new Button(this);
-        clear.setText("Clear selection");
-        clear.setOnClickListener(v -> {
+        addSpace(root, 10);
+
+        LinearLayout selectionControls = new LinearLayout(this);
+        selectionControls.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button selectAllButton = makeButton(
+                "Select all shown", Color.rgb(40, 105, 165)
+        );
+
+        Button clearButton = makeButton(
+                "Clear selection", Color.rgb(55, 68, 94)
+        );
+
+        selectionControls.addView(selectAllButton,
+                new LinearLayout.LayoutParams(0, dp(43), 1));
+
+        selectionControls.addView(new View(this),
+                new LinearLayout.LayoutParams(dp(8), 1));
+
+        selectionControls.addView(clearButton,
+                new LinearLayout.LayoutParams(0, dp(43), 1));
+
+        root.addView(selectionControls);
+
+        selectAllButton.setOnClickListener(v -> {
+            for (ApplicationInfo app : getVisibleApps()) {
+                selectedApps.add(app.packageName);
+            }
+            filterApps(searchInput.getText().toString());
+        });
+
+        clearButton.setOnClickListener(v -> {
             selectedApps.clear();
-            renderApps(searchBox.getText().toString().trim().toLowerCase());
+            filterApps(searchInput.getText().toString());
         });
-        LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(0, 48, 1);
-        clearParams.leftMargin = 8;
-        selectionButtons.addView(clear, clearParams);
 
-        appList = vertical();
-        LinearLayout.LayoutParams listParams = params(-1, -2);
-        listParams.topMargin = 8;
-        root.addView(appList, listParams);
+        addSpace(root, 10);
 
-        setContentView(scroll);
+        selectionCount = makeText(
+                "0 applications selected", 12, MUTED, true
+        );
+        root.addView(selectionCount);
 
-        searchBox.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                renderApps(s.toString().trim().toLowerCase());
-            }
-            @Override public void afterTextChanged(Editable s) {}
-        });
+        addSpace(root, 8);
+
+        appList = new LinearLayout(this);
+        appList.setOrientation(LinearLayout.VERTICAL);
+        root.addView(appList);
+
+        setContentView(scrollView);
     }
 
-    private String getAppName(ApplicationInfo info) {
-        CharSequence name = info.loadLabel(getPackageManager());
-        return name == null ? info.packageName : name.toString();
-    }
+    private void loadInstalledApps() {
+        installedApps.clear();
 
-    private void loadApps() {
-        try {
-            List<ApplicationInfo> apps = getPackageManager().getInstalledApplications(
-                PackageManager.GET_META_DATA);
-            for (ApplicationInfo info : apps) {
-                if (!info.packageName.equals(getPackageName())) {
-                    installedApps.add(info);
-                }
+        PackageManager pm = getPackageManager();
+
+        List<ApplicationInfo> apps =
+                pm.getInstalledApplications(PackageManager.GET_META_DATA);
+
+        for (ApplicationInfo app : apps) {
+            if (!getPackageName().equals(app.packageName)) {
+                installedApps.add(app);
             }
-            Collections.sort(installedApps, new Comparator<ApplicationInfo>() {
-                @Override public int compare(ApplicationInfo a, ApplicationInfo b) {
-                    return getAppName(a).compareToIgnoreCase(getAppName(b));
-                }
-            });
-        } catch (Exception e) {
-            Toast.makeText(this, "Could not load installed apps", Toast.LENGTH_LONG).show();
         }
+
+        Collections.sort(installedApps,
+                new Comparator<ApplicationInfo>() {
+                    @Override
+                    public int compare(ApplicationInfo a, ApplicationInfo b) {
+                        return pm.getApplicationLabel(a).toString()
+                                .compareToIgnoreCase(
+                                        pm.getApplicationLabel(b).toString()
+                                );
+                    }
+                });
+
+        filterApps("");
     }
 
-    private void renderApps(String query) {
-        if (appList == null) return;
-        appList.removeAllViews();
-        int shown = 0;
+    private List<ApplicationInfo> getVisibleApps() {
+        List<ApplicationInfo> visible = new ArrayList<>();
 
-        for (ApplicationInfo info : installedApps) {
-            String name = getAppName(info);
-            if (!query.isEmpty()
-                && !name.toLowerCase().contains(query)
-                && !info.packageName.toLowerCase().contains(query)) {
+        String query = searchInput == null
+                ? "" : searchInput.getText().toString()
+                .trim().toLowerCase(Locale.ROOT);
+
+        PackageManager pm = getPackageManager();
+
+        for (ApplicationInfo app : installedApps) {
+            String label = pm.getApplicationLabel(app)
+                    .toString().toLowerCase(Locale.ROOT);
+
+            String packageName = app.packageName.toLowerCase(Locale.ROOT);
+
+            if (label.contains(query) || packageName.contains(query)) {
+                visible.add(app);
+            }
+        }
+
+        return visible;
+    }
+
+    private void filterApps(String query) {
+        if (appList == null) return;
+
+        appList.removeAllViews();
+        appRows.clear();
+
+        PackageManager pm = getPackageManager();
+
+        String search = query.trim().toLowerCase(Locale.ROOT);
+
+        for (ApplicationInfo app : installedApps) {
+            String label = pm.getApplicationLabel(app).toString();
+            String packageName = app.packageName;
+
+            if (!label.toLowerCase(Locale.ROOT).contains(search)
+                    && !packageName.toLowerCase(Locale.ROOT).contains(search)) {
                 continue;
             }
 
             LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(12, 8, 12, 8);
-            row.setBackground(rounded(panel, 14));
-            LinearLayout.LayoutParams rowParams = params(-1, -2);
-            rowParams.topMargin = 6;
-            appList.addView(row, rowParams);
+            row.setPadding(dp(10), dp(9), dp(10), dp(9));
+            row.setBackgroundColor(PANEL);
 
-            android.widget.ImageView icon = new android.widget.ImageView(this);
+            LinearLayout.LayoutParams rowParams =
+                    new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                    );
+            rowParams.bottomMargin = dp(5);
+
+            ImageView icon = new ImageView(this);
+
             try {
-                icon.setImageDrawable(info.loadIcon(getPackageManager()));
-            } catch (Exception ignored) {}
-            row.addView(icon, params(42, 42));
+                Drawable drawable = pm.getApplicationIcon(app);
+                icon.setImageDrawable(drawable);
+            } catch (Exception ignored) {
+            }
 
-            LinearLayout labels = vertical();
-            LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -2, 1);
-            labelParams.leftMargin = 12;
-            row.addView(labels, labelParams);
+            row.addView(icon, new LinearLayout.LayoutParams(
+                    dp(40), dp(40)
+            ));
 
-            labels.addView(text(name, 15, white, true));
-            TextView packageLabel = text(info.packageName, 10, muted, false);
-            packageLabel.setMaxLines(1);
-            packageLabel.setSingleLine(true);
-            labels.addView(packageLabel);
+            LinearLayout details = new LinearLayout(this);
+            details.setOrientation(LinearLayout.VERTICAL);
+            details.setPadding(dp(10), 0, dp(5), 0);
 
-            CheckBox check = new CheckBox(this);
-            check.setButtonTintList(android.content.res.ColorStateList.valueOf(blue));
-            check.setChecked(selectedApps.contains(info.packageName));
-            check.setOnCheckedChangeListener((button, checked) -> {
-                if (checked) selectedApps.add(info.packageName);
-                else selectedApps.remove(info.packageName);
-                updateCount();
+            TextView appName = makeText(label, 14, WHITE, true);
+            TextView packageLabel = makeText(
+                    packageName, 10, MUTED, false
+            );
+
+            details.addView(appName);
+            addSpace(details, 3);
+            details.addView(packageLabel);
+
+            row.addView(details, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1
+            ));
+
+            CheckBox checkBox = new CheckBox(this);
+            checkBox.setButtonTintList(
+                    android.content.res.ColorStateList.valueOf(BLUE)
+            );
+            checkBox.setChecked(selectedApps.contains(packageName));
+
+            checkBox.setOnCheckedChangeListener((button, checked) -> {
+                if (checked) {
+                    selectedApps.add(packageName);
+                } else {
+                    selectedApps.remove(packageName);
+                }
+                updateSelectionCount();
             });
-            row.addView(check, params(48, 48));
-            row.setOnClickListener(v -> check.setChecked(!check.isChecked()));
-            shown++;
+
+            row.addView(checkBox);
+
+            row.setOnClickListener(v ->
+                    checkBox.setChecked(!checkBox.isChecked())
+            );
+
+            appList.addView(row, rowParams);
+            appRows.add(row);
         }
 
-        countText.setText(shown + " apps shown • " + selectedApps.size() + " selected");
-        if (shown == 0) {
-            TextView empty = text("No matching apps found.", 14, muted, false);
-            empty.setPadding(12, 20, 12, 20);
-            appList.addView(empty);
-        }
+        updateSelectionCount();
     }
 
-    private void updateCount() {
-        countText.setText(countText.getText().toString().split(" • ")[0]
-            + " • " + selectedApps.size() + " selected");
-    }
-
-    private void startProtection() {
+    private void requestProtection() {
         if (selectedApps.isEmpty()) {
-            new AlertDialog.Builder(this)
-                .setTitle("No apps selected")
-                .setMessage("Select at least one app to block.")
-                .setPositiveButton("OK", null)
-                .show();
+            showMessage(
+                    "No applications selected",
+                    "Search and select at least one application first."
+            );
             return;
         }
-        Intent intent = VpnService.prepare(this);
-        if (intent != null) {
-            startActivityForResult(intent, VPN_REQUEST);
+
+        Intent prepareIntent = VpnService.prepare(this);
+
+        if (prepareIntent != null) {
+            startActivityForResult(
+                    prepareIntent,
+                    VPN_REQUEST_CODE
+            );
         } else {
-            onActivityResult(VPN_REQUEST, RESULT_OK, null);
+            startFirewallService();
         }
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    protected void onActivityResult(
+            int requestCode, int resultCode, Intent data) {
+
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == VPN_REQUEST && resultCode == RESULT_OK) {
-            Intent service = new Intent(this, FirewallService.class);
-            service.setAction(FirewallService.ACTION_START);
-            service.putStringArrayListExtra(FirewallService.EXTRA_BLOCKED_APPS,
-                new ArrayList<>(selectedApps));
-            if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(service);
-            else startService(service);
-            protectionActive = true;
-            statusText.setText("● Protection requested");
-            statusText.setTextColor(Color.rgb(32, 201, 151));
-            Toast.makeText(this, "Starting AppShield protection", Toast.LENGTH_SHORT).show();
-        } else if (requestCode == VPN_REQUEST) {
-            Toast.makeText(this, "VPN permission was not granted", Toast.LENGTH_LONG).show();
+
+        if (requestCode == VPN_REQUEST_CODE) {
+            if (resultCode == RESULT_OK) {
+                startFirewallService();
+            } else {
+                showMessage(
+                        "VPN permission required",
+                        "Allow the VPN connection to enable AppShield."
+                );
+            }
         }
     }
 
+    private void startFirewallService() {
+        Intent intent = new Intent(this, FirewallService.class);
+        intent.setAction(FirewallService.ACTION_START);
+
+        intent.putStringArrayListExtra(
+                FirewallService.EXTRA_BLOCKED_APPS,
+                new ArrayList<>(selectedApps)
+        );
+
+        if (Build.VERSION.SDK_INT >= 26) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
+        }
+
+        statusText.setText("Protection requested");
+        statusDescription.setText(
+                "Android is starting the local VPN firewall."
+        );
+    }
+
     private void stopProtection() {
-        Intent service = new Intent(this, FirewallService.class);
-        service.setAction(FirewallService.ACTION_STOP);
-        startService(service);
-        protectionActive = false;
-        statusText.setText("● Protection is OFF");
-        statusText.setTextColor(muted);
-        Toast.makeText(this, "Protection stopped", Toast.LENGTH_SHORT).show();
+        Intent intent = new Intent(this, FirewallService.class);
+        intent.setAction(FirewallService.ACTION_STOP);
+        startService(intent);
+
+        statusText.setText("Protection is OFF");
+        statusDescription.setText("Firewall stopped.");
+    }
+
+    private void updateStatistics() {
+        if (statsPreferences == null) return;
+
+        long packets = statsPreferences.getLong(
+                FirewallService.KEY_PACKETS, 0
+        );
+
+        long bytes = statsPreferences.getLong(
+                FirewallService.KEY_BYTES, 0
+        );
+
+        long started = statsPreferences.getLong(
+                FirewallService.KEY_STARTED, 0
+        );
+
+        boolean active = statsPreferences.getBoolean(
+                FirewallService.KEY_ACTIVE, false
+        );
+
+        packetValue.setText(String.format(Locale.US, "%,d", packets));
+        byteValue.setText(formatBytes(bytes));
+
+        if (active && started > 0) {
+            uptimeValue.setText(
+                    formatDuration(System.currentTimeMillis() - started)
+            );
+
+            statusText.setText("Protection is ACTIVE");
+            statusText.setTextColor(GREEN);
+            statusDescription.setText(
+                    "Selected applications are routed through the local VPN."
+            );
+        } else {
+            uptimeValue.setText("00:00:00");
+            statusText.setText("Protection is OFF");
+            statusText.setTextColor(WHITE);
+            statusDescription.setText(
+                    "Select applications and start protection."
+            );
+        }
+    }
+
+    private void resetStatistics() {
+        new AlertDialog.Builder(this)
+                .setTitle("Reset statistics?")
+                .setMessage(
+                        "This will clear the packet and data counters."
+                )
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Reset", (dialog, which) -> {
+                    if (statsPreferences.getBoolean(
+                            FirewallService.KEY_ACTIVE, false)) {
+
+                        Intent intent = new Intent(
+                                this, FirewallService.class
+                        );
+                        intent.setAction(
+                                FirewallService.ACTION_RESET_STATS
+                        );
+
+                        startService(intent);
+
+                    } else {
+                        statsPreferences.edit()
+                                .putLong(FirewallService.KEY_PACKETS, 0)
+                                .putLong(FirewallService.KEY_BYTES, 0)
+                                .apply();
+                    }
+
+                    updateStatistics();
+                })
+                .show();
+    }
+
+    private String formatBytes(long bytes) {
+        if (bytes < 1024) {
+            return bytes + " B";
+        }
+
+        if (bytes < 1024L * 1024L) {
+            return String.format(
+                    Locale.US, "%.2f KB", bytes / 1024.0
+            );
+        }
+
+        if (bytes < 1024L * 1024L * 1024L) {
+            return String.format(
+                    Locale.US, "%.2f MB",
+                    bytes / (1024.0 * 1024.0)
+            );
+        }
+
+        return String.format(
+                Locale.US, "%.2f GB",
+                bytes / (1024.0 * 1024.0 * 1024.0)
+        );
+    }
+
+    private String formatDuration(long milliseconds) {
+        long seconds = Math.max(0, milliseconds / 1000);
+
+        long hours = seconds / 3600;
+        long minutes = (seconds % 3600) / 60;
+        long remainingSeconds = seconds % 60;
+
+        return String.format(
+                Locale.US,
+                "%02d:%02d:%02d",
+                hours, minutes, remainingSeconds
+        );
+    }
+
+    private LinearLayout createCard(LinearLayout parent) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16), dp(16), dp(16), dp(16));
+        card.setBackgroundColor(PANEL);
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        parent.addView(card, params);
+        return card;
+    }
+
+    private TextView makeText(
+            String value, float size, int color, boolean bold) {
+
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextSize(size);
+        text.setTextColor(color);
+
+        if (bold) {
+            text.setTypeface(null, Typeface.BOLD);
+        }
+
+        return text;
+    }
+
+    private Button makeButton(String label, int color) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextColor(WHITE);
+        button.setTextSize(12);
+        button.setAllCaps(false);
+        button.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(color)
+        );
+
+        return button;
+    }
+
+    private void addSpace(LinearLayout parent, int heightDp) {
+        View space = new View(this);
+        parent.addView(space, new LinearLayout.LayoutParams(
+                1, dp(heightDp)
+        ));
+    }
+
+    private int dp(float value) {
+        return (int) (value * getResources()
+                .getDisplayMetrics().density + 0.5f);
+    }
+
+    private void updateSelectionCount() {
+        if (selectionCount != null) {
+            selectionCount.setText(
+                    selectedApps.size() + " applications selected"
+            );
+        }
+    }
+
+    private void showMessage(String title, String message) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        handler.removeCallbacks(statsUpdater);
+        handler.post(statsUpdater);
+    }
+
+    @Override
+    protected void onPause() {
+        handler.removeCallbacks(statsUpdater);
+        super.onPause();
     }
 }
