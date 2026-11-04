@@ -49,10 +49,6 @@ Selected applications' packets are discarded rather than forwarded, helping prev
 4. Open AppShield and grant VPN permission.
 5. Select the applications you want to block and start protection.
 
-## Screenshots
-
-Screenshots will be added in a future update.
-
 ## License
 
 MIT License. See the [LICENSE](LICENSE) file.
